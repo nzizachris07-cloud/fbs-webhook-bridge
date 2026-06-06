@@ -1,0 +1,93 @@
+web: gunicorn fbs_webhook_receiver:app
+Flask==3.0.3
+gunicorn==22.0.0
+requests==2.32.3
+# Simple Python Webhook Receiver for FBS (MetaTrader)
+# This script receives trade signals from your Android app and prints them.
+# You can host this for free on Render, Fly.io, or Railway!
+
+from flask import Flask, request, jsonify
+import os
+
+app = Flask(__name__)
+
+# SECURITY TOKEN: Set this to protect your webhook from others.
+# If hosting on Render, you can set the environment variable WEBHOOK_TOKEN.
+SECURITY_TOKEN = os.environ.get("WEBHOOK_TOKEN", "my_secure_passcode_123")
+
+@app.route('/', methods=['GET'])
+def home():
+    return "FBS Webhook Bridge is running! Status: Active.", 200
+
+@app.route('/webhook', methods=['POST'])
+def webhook_receiver():
+    try:
+        # 1. Get the JSON data sent from the Android App
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "No JSON data received"}), 400
+
+        print(f"Received webhook payload: {data}")
+
+        # 2. Check security token
+        app_token = data.get("pass_token")
+        if app_token != SECURITY_TOKEN:
+            print("Unauthorized access attempt: Invalid Token.")
+            return jsonify({"status": "error", "message": "Unauthorized: Invalid pass_token"}), 401
+
+        # 3. Extract the Trade Signal Details
+        event = data.get("event")            # e.g. "SWEEP_SHORT_ORDER"
+        symbol = data.get("symbol")          # e.g. "EURUSD"
+        entry_price = data.get("entry_price")
+        tp_price = data.get("tp_price")
+
+        print(f"--- NEW SIGNAL DETECTED ---")
+        print(f"Action: {event}")
+        print(f"Symbol: {symbol}")
+        print(f"Entry Price: {entry_price}")
+        print(f"Take Profit: {tp_price}")
+        print(f"---------------------------")
+
+        # --------------------------------------------------------------
+        # OPTIONAL: CONNECT TO METATRADER 5 (MT5)
+        # Note: The 'MetaTrader5' library only runs on Windows with MT5 installed.
+        #
+        # import MetaTrader5 as mt5
+        # if not mt5.initialize():
+        #     print("MT5 initialize failed")
+        # else:
+        #     # Prepare order
+        #     order_type = mt5.ORDER_TYPE_SELL if "SHORT" in event else mt5.ORDER_TYPE_BUY
+        #     request_dict = {
+        #         "action": mt5.TRADE_ACTION_DEAL,
+        #         "symbol": symbol,
+        #         "volume": 0.1,  # Lot size
+        #         "type": order_type,
+        #         "price": float(entry_price),
+        #         "sl": 0.0,
+        #         "tp": float(tp_price),
+        #         "deviation": 20,
+        #         "magic": 123456,
+        #         "comment": "Android Trading Bot Signal",
+        #         "type_time": mt5.ORDER_TIME_GTC,
+        #         "type_filling": mt5.ORDER_FILLING_IOC,
+        #     }
+        #     result = mt5.order_send(request_dict)
+        #     print(f"MT5 Order Result: {result}")
+        #     mt5.shutdown()
+        # --------------------------------------------------------------
+
+        # Return a success message back to the Android App
+        return jsonify({
+            "status": "success",
+            "message": f"Signal for {symbol} received and processed successfully!"
+        }), 200
+
+    except Exception as e:
+        print(f"Error processing webhook: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+if __name__ == '__main__':
+    # Get port from environment variable, default to 5000 for local testing
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
